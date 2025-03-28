@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <title>函数性质和图像计算器</title>
+</head>
+<body>
+    <h1>输入函数表达式</h1>
+    <form method="POST">
+        <input type="text" name="function" placeholder="例如: x**3 - 3*x + 1" size="40" required>
+        <button type="submit">提交</button>
+    </form>
+    {% if result %}
+    <h2>计算结果</h2>
+    {% if result.error %}
+      <p style="color:red;">{{ result.error }}</p>
+    {% else %}
+      <p><strong>函数：</strong>{{ result.expr }}</p>
+      <p><strong>定义域：</strong>{{ result.domain }}</p>
+      <p><strong>零点：</strong>{{ result.zeros }}</p>
+      <p><strong>导函数：</strong>{{ result.derivative }}</p>
+      <p><strong>局部极值：</strong>
+         <ul>
+         {% for ext in result.extrema %}
+            <li>{{ ext }}</li>
+         {% endfor %}
+         </ul>
+      </p>
+      <p><strong>单调性分析：</strong>{{ result.monotonicity }}</p>
+      <img src="/plot.png" alt="函数图像">
+    {% endif %}
+    {% endif %}
+</body>
+</html>
