@@ -120,10 +120,13 @@ def create_plot(expr):
     x = sp.symbols('x')
     f = sp.lambdify(x, expr, "numpy")
     xs = np.linspace(-10, 10, 400)
-    try:
-        ys = f(xs)
-    except Exception:
-        ys = np.zeros_like(xs)
+    ys = np.zeros_like(xs)
+
+    for i, val in enumerate(xs):
+        try:
+            ys[i] = f(val)
+        except Exception:
+            ys[i] = np.nan  # 使用 np.nan 填充未定义的点
 
     plt.figure(figsize=(6, 4))
     plt.plot(xs, ys, label=f"y = {sp.pretty(expr)}")
@@ -138,6 +141,7 @@ def create_plot(expr):
     buf.seek(0)
     plt.close()
     return buf
+
 
 
 @app.route("/", methods=["GET", "POST"])
