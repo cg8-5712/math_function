@@ -6,84 +6,122 @@ import io
 
 app = Flask(__name__)
 
+
+def domain_to_str(dom):
+    """
+    将 Sympy 的域（Interval、Union、FiniteSet 等）转换为更易读的字符串形式。
+    """
+    if isinstance(dom, sp.Interval):
+        left_bracket = "(" if dom.left_open else "["
+        right_bracket = ")" if dom.right_open else "]"
+        left = "-∞" if dom.start.is_negative_infinity else str(dom.start)
+        right = "∞" if dom.end.is_positive_infinity else str(dom.end)
+        return f"{left_bracket}{left}, {right}{right_bracket}"
+    elif isinstance(dom, sp.Union):
+        # 对 Union 中的每个子集递归调用 domain_to_str，再用 ∪ 拼接
+        return " ∪ ".join(domain_to_str(a) for a in dom.args)
+    elif isinstance(dom, sp.Intersection):
+        # 类似处理 Intersection
+        return " ∩ ".join(domain_to_str(a) for a in dom.args)
+    elif isinstance(dom, sp.FiniteSet):
+        # 对有限点集做特殊处理
+        if len(dom) == 0:
+            return "∅"
+        else:
+            return "{" + ", ".join(str(a) for a in sorted(dom)) + "}"
+    else:
+        # 其他情况直接转成字符串
+        return str(dom)
+
+
 def analyze_function(func_str):
-    # 定义符号变量
-    x = sp.symbols('x')
-    # 解析函数表达式
+    x = sp.Symbol('x', real=True)
+    # 1. 解析函数
     try:
         expr = sp.sympify(func_str)
-        if expr.is_constant():
-            raise ValueError("表达式是一个常数，无法绘制图像")
     except Exception as e:
         return {"error": f"解析表达式失败: {e}"}
 
-        # 自动求解定义域：利用 continuous_domain 求连续域（基本上可以视为定义域）
+    # 2. 求定义域
+    # continuous_domain 通常可视为函数在实数上的“连续”区间，也可视为定义域近似
     try:
-        domain_expr = sp.calculus.util.continuous_domain(expr, x, sp.S.Reals)
-        domain = str(domain_expr)
+        raw_domain = sp.calculus.util.continuous_domain(expr, x, sp.S.Reals)
+        domain = domain_to_str(raw_domain)
     except Exception as e:
         domain = f"无法确定定义域：{e}"
 
-    # 求零点（仅对多项式或可求解析解的函数）
+    # 3. 求零点
+    # solve 在部分情况下可能无法解析求解；此处做简单处理
     try:
-        zeros = sp.solve(expr, x)
+        zeros = sp.solve(expr, x, dict=False)
     except Exception:
-        zeros = "无法求零点"
+        zeros = []
+    if not zeros:
+        zeros_str = "无"
+    else:
+        # 转换成字符串，便于输出
+        zeros_str = ", ".join(str(z) for z in zeros)
 
-    # 求导
+    # 4. 求导数
     derivative = sp.diff(expr, x)
+    derivative_str = sp.pretty(derivative)
 
-    # 求驻点并判断极值
-    critical_points = sp.solve(derivative, x)
+    # 5. 求驻点、极值
+    critical_points = sp.solve(sp.Eq(derivative, 0), x, dict=False)
     extrema = []
-    # 计算二阶导数
     second_derivative = sp.diff(derivative, x)
     for cp in critical_points:
-        try:
-            second_val = second_derivative.subs(x, cp)
-            if second_val.is_real:
-                if second_val > 0:
-                    extrema.append(f"x = {cp} 为局部最小值")
-                elif second_val < 0:
-                    extrema.append(f"x = {cp} 为局部最大值")
-                else:
-                    extrema.append(f"x = {cp} 可能为拐点")
+        # 二阶导数判断
+        second_val = second_derivative.subs(x, cp)
+        # 可能出现无法比较大小的情况，需要做一定判断
+        if second_val.is_real:
+            if second_val > 0:
+                extrema.append(f"x = {cp} 为局部最小值")
+            elif second_val < 0:
+                extrema.append(f"x = {cp} 为局部最大值")
             else:
-                extrema.append(f"x = {cp} 分析不充分")
-        except Exception as e:
-            extrema.append(f"x = {cp} 分析失败: {e}")
+                extrema.append(f"x = {cp} 可能为拐点")
+        else:
+            extrema.append(f"x = {cp} 分析不充分")
 
-    # 关于单调性，在 [-10,10] 区间内采样判断
+    if not extrema:
+        extrema_str = "无明显局部极值"
+    else:
+        # 多个极值点时，按列表输出
+        extrema_str = "<br>".join(extrema)
+
+    # 6. 单调性分析（此处只在 [-10, 10] 采样做示例）
     xs = np.linspace(-10, 10, 400)
     f_deriv = sp.lambdify(x, derivative, 'numpy')
-    deriv_vals = f_deriv(xs)
-    if np.all(deriv_vals >= -1e-6):
-        monotonicity = "在区间 [-10,10] 内单调递增"
-    elif np.all(deriv_vals <= 1e-6):
-        monotonicity = "在区间 [-10,10] 内单调递减"
+    try:
+        deriv_vals = f_deriv(xs)
+    except Exception:
+        deriv_vals = np.zeros_like(xs)
+    if np.all(deriv_vals >= 0):
+        monotonicity = "在区间 [-10,10] 内整体单调递增"
+    elif np.all(deriv_vals <= 0):
+        monotonicity = "在区间 [-10,10] 内整体单调递减"
     else:
         monotonicity = "在区间 [-10,10] 内存在单调性变化"
 
+    # 7. 组织返回结果
     result = {
         "expr": sp.pretty(expr),
         "domain": domain,
-        "zeros": zeros,
-        "derivative": sp.pretty(derivative),
-        "extrema": extrema if extrema else "无明显局部极值",
+        "zeros": zeros_str,
+        "derivative": derivative_str,
+        "extrema": extrema_str,
         "monotonicity": monotonicity
     }
     return result
 
+
 def create_plot(expr):
     x = sp.symbols('x')
-    # 将 sympy 表达式转换为可计算函数
     f = sp.lambdify(x, expr, "numpy")
     xs = np.linspace(-10, 10, 400)
     try:
         ys = f(xs)
-        # 如果 ys 是一个标量值，将其扩展为与 xs 形状相同的数组
-        if ys.ndim == 0:
-            ys = np.full_like(xs, ys)
     except Exception:
         ys = np.zeros_like(xs)
 
@@ -95,12 +133,12 @@ def create_plot(expr):
     plt.legend()
     plt.grid(True)
 
-    # 将图像保存到内存中
     buf = io.BytesIO()
     plt.savefig(buf, format='png')
     buf.seek(0)
     plt.close()
     return buf
+
 
 @app.route("/", methods=["GET", "POST"])
 def index():
@@ -108,7 +146,6 @@ def index():
     if request.method == "POST":
         func_str = request.form["function"]
         result = analyze_function(func_str)
-        # 保存图像到全局变量
         global plot_buf, expr_plot
         try:
             expr_plot = sp.sympify(func_str)
@@ -117,10 +154,12 @@ def index():
         plot_buf = create_plot(expr_plot)
     return render_template("index.html", result=result)
 
+
 @app.route("/plot.png")
 def plot_png():
     global plot_buf
     return send_file(plot_buf, mimetype="image/png")
+
 
 if __name__ == "__main__":
     app.run(debug=True)
