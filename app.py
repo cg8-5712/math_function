@@ -6,65 +6,65 @@ import io
 
 app = Flask(__name__)
 
-class FunctionAnalyzer:
-    @staticmethod
-    def domain_to_str(dom):
-        """
-        将 Sympy 的 的（Interval、Union、FiniteSet 等）转换为更易读的字符串形式。
-        """
-        if isinstance(dom, sp.Interval):
-            left_bracket = "(" if dom.left_open else "["
-            right_bracket = ")" if dom.right_open else "]"
-            left = "-∞" if dom.start == -sp.oo else str(dom.start)
-            right = "∞" if dom.end == sp.oo else str(dom.end)
-            return f"{left_bracket}{left}, {right}{right_bracket}"
-        elif isinstance(dom, sp.Union):
-            return " ∪ ".join(FunctionAnalyzer.domain_to_str(a) for a in dom.args)
-        elif isinstance(dom, sp.Intersection):
-            return " ∩ ".join(FunctionAnalyzer.domain_to_str(a) for a in dom.args)
-        elif isinstance(dom, sp.FiniteSet):
-            if len(dom) == 0:
-                return "∅"
-            else:
-                return "{" + ", ".join(str(a) for a in sorted(dom)) + "}"
+
+def domain_to_str(dom):
+    """
+    将 Sympy 的域（Interval、Union、FiniteSet 等）转换为更易读的字符串形式。
+    """
+    if isinstance(dom, sp.Interval):
+        left_bracket = "(" if dom.left_open else "["
+        right_bracket = ")" if dom.right_open else "]"
+        left = "-∞" if dom.start == -sp.oo else str(dom.start)
+        right = "∞" if dom.end == sp.oo else str(dom.end)
+        return f"{left_bracket}{left}, {right}{right_bracket}"
+    elif isinstance(dom, sp.Union):
+        return " ∪ ".join(domain_to_str(a) for a in dom.args)
+    elif isinstance(dom, sp.Intersection):
+        return " ∩ ".join(domain_to_str(a) for a in dom.args)
+    elif isinstance(dom, sp.FiniteSet):
+        if len(dom) == 0:
+            return "∅"
         else:
-            return str(dom)
+            return "{" + ", ".join(str(a) for a in sorted(dom)) + "}"
+    else:
+        return str(dom)
 
-    @staticmethod
-    def analyze_function(func_str):
-        x = sp.Symbol('x', real=True)
-        # 1. 解析函数
+
+def analyze_function(func_str):
+    # 定义符号变量
+    x = sp.symbols('x')
+    # 解析函数表达式
+    try:
+        expr = sp.sympify(func_str)
+    except Exception as e:
+        return {"error": f"解析表达式失败: {e}"}
+
+    # 定义域（通过 Sympy 连续性检查）
+    try:
+        raw_domain = sp.calculus.util.continuous_domain(expr, x, sp.S.Reals)
+    except Exception:
+        raw_domain = sp.S.Reals  # 如果出错，默认全体实数
+
+    if raw_domain == sp.S.Reals:
+        domain = "(-∞, ∞)"
+    else:
+        domain = domain_to_str(raw_domain)
+
+    # 求零点
+    try:
+        zeros = sp.solve(expr, x)
+    except Exception:
+        zeros = "无法求零点"
+
+    # 求导
+    derivative = sp.diff(expr, x)
+
+    # 求驻点并判断极值
+    critical_points = sp.solve(derivative, x)
+    second_derivative = sp.diff(derivative, x)
+    extrema = []
+    for cp in critical_points:
         try:
-            expr = sp.sympify(func_str)
-        except Exception as e:
-            return {"error": f"解析表达式失败: {e}"}
-
-        # 2. 求定义域
-        try:
-            raw_domain = sp.calculus.util.continuous_domain(expr, x, sp.S.Reals)
-            if raw_domain == sp.S.Reals:
-                domain = "(-∞, ∞)"
-            else:
-                domain = FunctionAnalyzer.domain_to_str(raw_domain)
-        except Exception as e:
-            domain = f"无法确定定义域：{e}"
-
-        # 3. 求零点
-        try:
-            zeros = sp.solve(expr, x, dict=False)
-        except Exception:
-            zeros = []
-        zeros_str = "无" if not zeros else ", ".join(str(z) for z in zeros)
-
-        # 4. 求导数
-        derivative = sp.diff(expr, x)
-        derivative_str = sp.pretty(derivative)
-
-        # 5. 求驻点、极值
-        critical_points = sp.solve(sp.Eq(derivative, 0), x, dict=False)
-        extrema = []
-        second_derivative = sp.diff(derivative, x)
-        for cp in critical_points:
             second_val = second_derivative.subs(x, cp)
             if second_val.is_real:
                 if second_val > 0:
@@ -75,115 +75,92 @@ class FunctionAnalyzer:
                     extrema.append(f"x = {cp} 可能为拐点")
             else:
                 extrema.append(f"x = {cp} 分析不充分")
-        extrema_str = "无明显局部极值" if not extrema else "<br>".join(extrema)
+        except Exception as e:
+            extrema.append(f"x = {cp} 分析失败: {e}")
 
-        # 6. 单调性分析：在定义域内分别分析每个连续区间
-        f_deriv = sp.lambdify(x, derivative, 'numpy')
-        monotonicity_list = []
+    # 关于单调性，在 [-10,10] 区间内采样判断
+    xs = np.linspace(-10, 10, 400)
+    f_deriv = sp.lambdify(x, derivative, 'numpy')
+    try:
+        deriv_vals = f_deriv(xs)
+    except Exception:
+        deriv_vals = np.zeros_like(xs)
 
-        # 提取连续区间列表
-        if raw_domain == sp.S.Reals:
-            domain_intervals = [sp.Interval(-sp.oo, sp.oo)]
-        elif isinstance(raw_domain, sp.Interval):
-            domain_intervals = [raw_domain]
-        elif isinstance(raw_domain, sp.Union):
-            domain_intervals = [i for i in raw_domain.args if isinstance(i, sp.Interval)]
-        else:
-            domain_intervals = []
+    eps = 1e-7  # 容许的数值误差
+    if np.all(deriv_vals >= -eps):
+        monotonicity = "在区间 [-10,10] 内单调递增"
+    elif np.all(deriv_vals <= eps):
+        monotonicity = "在区间 [-10,10] 内单调递减"
+    else:
+        monotonicity = "在区间 [-10,10] 内存在单调性变化"
 
-        EPS = 1e-3  # 避免采样时取到端点处不适定值
+    # 下面将表达式转成 LaTeX，以便前端用 MathJax 渲染
+    # zeros 如果是列表，则每个元素都转成 LaTeX；如果是字符串(例如 "无法求零点")，则直接保留
+    if isinstance(zeros, list):
+        zeros_latex = [sp.latex(z) for z in zeros]
+    else:
+        zeros_latex = zeros  # 保持字符串
 
-        for interval in domain_intervals:
-            # 对于无限端点，采样时取较大或较小的有限值；显示时依然使用无限端点
-            if interval.start == -sp.oo:
-                a = -100
-            else:
-                # 如果区间左端点为 0（且为开区间），则取 0+EPS
-                a = float(interval.start) if float(interval.start) != 0 else 0 + EPS
+    # extrema 里存放的是字符串描述（如 “x = 1 为局部最小值”），
+    # 如果想要更精细的 LaTeX 化，可以自行拆分这里的逻辑。
+    # 这里为了简单，先保持字符串，直接显示文本。
 
-            if interval.end == sp.oo:
-                b = 100
-            else:
-                # 如果区间右端点为 0（且为开区间），则取 0-EPS
-                b = float(interval.end) if float(interval.end) != 0 else 0 - EPS
+    result = {
+        "expr": sp.latex(expr),
+        "domain": domain,
+        "zeros": zeros_latex,
+        "derivative": sp.latex(derivative),
+        "extrema": extrema if extrema else "无明显局部极值",
+        "monotonicity": monotonicity
+    }
+    return result
 
-            # 对于开区间端点为0的情况，确保采样区间内不包含 0
-            if a == 0:
-                a += EPS
-            if b == 0:
-                b -= EPS
 
-            xs_dom = np.linspace(a, b, 400)
-            try:
-                deriv_vals_dom = f_deriv(xs_dom)
-            except Exception:
-                deriv_vals_dom = np.zeros_like(xs_dom)
-            if np.all(deriv_vals_dom >= 0):
-                monotonicity_list.append(f"在区间 {FunctionAnalyzer.domain_to_str(interval)} 内单调递增")
-            elif np.all(deriv_vals_dom <= 0):
-                monotonicity_list.append(f"在区间 {FunctionAnalyzer.domain_to_str(interval)} 内单调递减")
-            else:
-                monotonicity_list.append(f"在区间 {FunctionAnalyzer.domain_to_str(interval)} 内存在单调性变化")
-        monotonicity = "；".join(monotonicity_list) if monotonicity_list else "无法分析单调性"
-
-        result = {
-            "expr": sp.pretty(expr),
-            "domain": domain,
-            "zeros": zeros_str,
-            "derivative": derivative_str,
-            "extrema": extrema_str,
-            "monotonicity": monotonicity
-        }
-        return result
-
-class PlotCreator:
-    @staticmethod
-    def create_plot(expr):
-        x = sp.symbols('x')
-        f = sp.lambdify(x, expr, "numpy")
-        xs = np.linspace(-10, 10, 400)
+def create_plot(expr):
+    x = sp.symbols('x', real=True)
+    f = sp.lambdify(x, expr, "numpy")
+    xs = np.linspace(-10, 10, 400)
+    try:
+        ys = f(xs)
+    except Exception:
         ys = np.zeros_like(xs)
 
-        for i, val in enumerate(xs):
-            try:
-                ys[i] = f(val)
-            except Exception:
-                ys[i] = np.nan  # 使用 np.nan 填充未定义的点
+    plt.figure(figsize=(6, 4))
+    plt.plot(xs, ys, label=r"$y = " + sp.latex(expr) + "$")
+    plt.xlabel("x")
+    plt.ylabel("y")
+    plt.title("函数图像")
+    plt.legend()
+    plt.grid(True)
 
-        plt.figure(figsize=(6, 4))
-        plt.plot(xs, ys, label=f"y = {sp.pretty(expr)}")
-        plt.xlabel("x")
-        plt.ylabel("y")
-        plt.title("函数图像")
-        plt.legend()
-        plt.grid(True)
+    buf = io.BytesIO()
+    plt.savefig(buf, format='png')
+    buf.seek(0)
+    plt.close()
+    return buf
 
-        buf = io.BytesIO()
-        plt.savefig(buf, format='png')
-        buf.seek(0)
-        plt.close()
-        return buf
 
 @app.route("/", methods=["GET", "POST"])
 def index():
     result = None
     if request.method == "POST":
         func_str = request.form["function"]
-        analyzer = FunctionAnalyzer()
-        result = analyzer.analyze_function(func_str)
-        plot_creator = PlotCreator()
+        result = analyze_function(func_str)
+        # 保存图像到全局变量
+        global plot_buf, expr_plot
         try:
             expr_plot = sp.sympify(func_str)
         except Exception:
             expr_plot = sp.sympify("0")
-        global plot_buf
-        plot_buf = plot_creator.create_plot(expr_plot)
+        plot_buf = create_plot(expr_plot)
     return render_template("index.html", result=result)
+
 
 @app.route("/plot.png")
 def plot_png():
     global plot_buf
     return send_file(plot_buf, mimetype="image/png")
+
 
 if __name__ == "__main__":
     app.run(debug=True)

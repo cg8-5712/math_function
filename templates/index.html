@@ -1,27 +1,60 @@
 <!DOCTYPE html>
-<html lang="zh">
+<html>
 <head>
-    <meta charset="UTF-8">
-    <title>函数性质和图像计算器</title>
+    <meta charset="utf-8">
+    <title>函数分析</title>
+    <!-- 引入 MathJax -->
+    <script src="https://polyfill.io/v3/polyfill.min.js?features=es6"></script>
+    <script id="MathJax-script" async
+      src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-chtml.js">
+    </script>
 </head>
 <body>
-    <h1>输入函数表达式</h1>
-    <form method="POST">
-        <input type="text" name="function" placeholder="例如: x**3 - 3*x + 1" size="40" required>
-        <button type="submit">提交</button>
+    <h1>函数分析</h1>
+    <form method="post" action="/">
+        <label for="function">输入函数表达式：</label>
+        <input type="text" id="function" name="function" placeholder="例如: 1/x">
+        <button type="submit">计算</button>
     </form>
+
     {% if result %}
-      <h2>计算结果</h2>
+      <!-- 如果 analyze_function 出错，则 result 中可能包含 'error' -->
       {% if result.error %}
-        <p style="color:red;">{{ result.error }}</p>
+        <h2>错误：{{ result.error }}</h2>
       {% else %}
-        <p><strong>函数：</strong><br>{{ result.expr }}</p>
-        <p><strong>定义域：</strong><br>{{ result.domain }}</p>
-        <p><strong>零点：</strong><br>{{ result.zeros }}</p>
-        <p><strong>导函数：</strong><br>{{ result.derivative }}</p>
-        <p><strong>局部极值：</strong><br>{{ result.extrema|safe }}</p>
-        <p><strong>单调性分析：</strong><br>{{ result.monotonicity }}</p>
-        <img src="/plot.png" alt="函数图像">
+        <h2>计算结果</h2>
+        <p><strong>函数：</strong> \( {{ result.expr|safe }} \)</p>
+        <p><strong>定义域：</strong> {{ result.domain }}</p>
+
+        <p><strong>零点：</strong>
+          {% if result.zeros is string %}
+            {{ result.zeros }}
+          {% else %}
+            <!-- 说明 zeros 是个列表，里面是 latex 字符串 -->
+            {% for z in result.zeros %}
+              \( {{ z|safe }} \){% if not loop.last %}, {% endif %}
+            {% endfor %}
+          {% endif %}
+        </p>
+
+        <p><strong>导数：</strong> \( {{ result.derivative|safe }} \)</p>
+
+        <p><strong>驻点及极值：</strong>
+          {% if result.extrema is string %}
+            {{ result.extrema }}
+          {% else %}
+            <ul>
+            {% for e in result.extrema %}
+              <li>{{ e }}</li>
+            {% endfor %}
+            </ul>
+          {% endif %}
+        </p>
+
+        <p><strong>单调性：</strong> {{ result.monotonicity }}</p>
+
+        <h3>函数图像</h3>
+        <img src="{{ url_for('plot_png') }}" alt="函数图像">
       {% endif %}
     {% endif %}
 </body>
