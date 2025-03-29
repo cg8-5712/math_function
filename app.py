@@ -6,7 +6,6 @@ import io
 
 app = Flask(__name__)
 
-
 def domain_to_str(dom):
     """
     将 Sympy 的域（Interval、Union、FiniteSet 等）转换为更易读的字符串形式。
@@ -20,7 +19,7 @@ def domain_to_str(dom):
     elif isinstance(dom, sp.Union):
         return " ∪ ".join(domain_to_str(a) for a in dom.args)
     elif isinstance(dom, sp.Intersection):
-        return " ∩ ".join(domain_to_str(a) for a in dom.args)
+        return " " + " ∩ ".join(domain_to_str(a) for a in dom.args) + " "
     elif isinstance(dom, sp.FiniteSet):
         if len(dom) == 0:
             return "∅"
@@ -28,7 +27,6 @@ def domain_to_str(dom):
             return "{" + ", ".join(str(a) for a in sorted(dom)) + "}"
     else:
         return str(dom)
-
 
 def analyze_function(func_str):
     # 定义符号变量
@@ -115,23 +113,42 @@ def analyze_function(func_str):
     }
     return result
 
-
 def create_plot(expr):
-    x = sp.symbols('x', real=True)
+    x = sp.symbols('x')
     f = sp.lambdify(x, expr, "numpy")
-    xs = np.linspace(-10, 10, 400)
+    xs = np.linspace(-5, 5, 400)  # 更改区间为 [-3, 3]
     try:
         ys = f(xs)
     except Exception:
         ys = np.zeros_like(xs)
 
-    plt.figure(figsize=(6, 4))
-    plt.plot(xs, ys, label=r"$y = " + sp.latex(expr) + "$")
-    plt.xlabel("x")
-    plt.ylabel("y")
-    plt.title("函数图像")
-    plt.legend()
+    plt.figure(figsize=(8, 6))
+    plt.plot(xs, ys, label=f"$y = {sp.latex(expr)}$", color='b', linewidth=2)
+
+    # 添加 x 轴和 y 轴
+    plt.axhline(0, color='black', linewidth=1, linestyle='--')
+    plt.axvline(0, color='black', linewidth=1, linestyle='--')
+
+    # 标注特殊点（零点）
+    try:
+        zeros = sp.solve(expr, x)
+        real_zeros = [z.evalf() for z in zeros if z.is_real]
+        for zero in real_zeros:
+            plt.scatter(zero, f(zero), color='red', zorder=3)
+            plt.text(zero, f(zero), f'({zero:.2f}, {f(zero):.2f})', fontsize=12, verticalalignment='bottom')
+    except Exception:
+        pass
+
+    # 设置标题和标签
+    plt.title("Plot of $y = " + sp.latex(expr) + "$", fontsize=14)
+    plt.xlabel("$x$", fontsize=12)
+    plt.ylabel("$y$", fontsize=12)
+    plt.legend(fontsize=10)
     plt.grid(True)
+
+    # 图像调整
+    plt.ylim(min(ys) - 10, max(ys) + 10)  # 调整 y 轴范围，避免函数值过大导致显示不全
+    plt.tight_layout()  # 自动调整图像布局，避免标题或标签被截断
 
     buf = io.BytesIO()
     plt.savefig(buf, format='png')
@@ -142,25 +159,21 @@ def create_plot(expr):
 
 @app.route("/", methods=["GET", "POST"])
 def index():
+    global plot_buf
     result = None
     if request.method == "POST":
         func_str = request.form["function"]
         result = analyze_function(func_str)
-        # 保存图像到全局变量
-        global plot_buf, expr_plot
-        try:
-            expr_plot = sp.sympify(func_str)
-        except Exception:
-            expr_plot = sp.sympify("0")
+        expr_plot = sp.sympify(func_str)
         plot_buf = create_plot(expr_plot)
+        return render_template("index.html", result=result, plot_buf=plot_buf)
     return render_template("index.html", result=result)
-
 
 @app.route("/plot.png")
 def plot_png():
+    # 从全局变量中获取图像缓冲区
     global plot_buf
     return send_file(plot_buf, mimetype="image/png")
-
 
 if __name__ == "__main__":
     app.run(debug=True)
